@@ -1,0 +1,20 @@
+name: Dispatch test
+
+on:
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'A short test string'
+        required: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print context
+        run: |
+          echo "Dispatch test ran"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "Input test: '${{ github.event.inputs.test }}'"
+          echo "Run URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"

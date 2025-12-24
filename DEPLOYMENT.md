@@ -78,4 +78,25 @@ Uso rápido:
 
 ---
 
-¿Quieres que añada la configuración para desplegar y publicar una imagen Docker en Docker Hub, o un paso para reportar también a la API de Jira?
+## Verificación rápida de `workflow_dispatch` ✅
+
+Si recibes un error HTTP 422 al intentar disparar un workflow, normalmente significa que la versión del workflow que está en GitHub (rama `main`) no incluye `workflow_dispatch` o que el workflow que intentas ejecutar no está en la rama/commit que indicas.
+
+Pasos para verificar y probar (recomendado):
+
+1. Asegúrate de haber commit/pusheado los archivos del workflow a `main`:
+   - `git add .github/workflows && git commit -m "Add workflows for manual dispatch" && git push origin main`
+2. Lista los workflows remotos y confirma que el workflow soporta `workflow_dispatch`:
+   - `gh workflow list --repo ${OWNER}/${REPO}`
+   - `gh workflow view create-deployment.yml --repo ${OWNER}/${REPO} --yaml`
+3. Prueba con un workflow de test (añadido: `.github/workflows/dispatch-test.yml`):
+   - Ejecuta: `gh workflow run dispatch-test.yml -f test=ok`
+   - O desde la UI: Actions → Dispatch test → Run workflow → rellenar `test` → Run.
+4. Si prefieres usar la API con ID, primero confirma el ID:
+   - `gh workflow list --repo ${OWNER}/${REPO}` (usa el ID o nombre que veas ahí).
+
+> Consejo: ejecutar por `filename` (p. ej. `dispatch-test.yml`) evita errores por IDs que cambian entre commits.
+
+---
+
+¿Quieres que haga el commit por ti (si no lo has hecho) o prefieres que te guíe en los pasos para pushear y ejecutar el `dispatch-test` desde tu terminal?
