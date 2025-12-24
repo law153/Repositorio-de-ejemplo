@@ -1,0 +1,89 @@
+name: Jira Deploy Test (dummy deployment for Jira)
+
+# Purpose: Create real GitHub Deployment events (pending -> success)
+# so Jira Cloud (with Atlassian for GitHub installed) can display them in
+# the Jira "Deployments" panel. This workflow performs NO real external
+# deployment when run with `test_only=true` (default for manual runs).
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    # Optional inputs when run manually
+    inputs:
+      environment:
+        description: 'Deployment environment (e.g. production, staging, review)'
+        required: false
+        default: 'production'
+      ref:
+        description: 'Ref to deploy (branch, tag, or SHA). Defaults to the commit that triggered the run.'
+        required: false
+      test_only:
+        description: 'If true, mark deployment successful without doing the actual deployment (default true)'
+        required: false
+        default: 'true'
+
+permissions:
+  # Need `deployments: write` to create/update deployments
+  contents: read
+  deployments: write
+
+jobs:
+  create-deployment:
+    name: Create Deployment (pending → success)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Create a GitHub Deployment with initial-status 'pending'.
+      # We use chrnorm/deployment-action which wraps the GitHub Deployments API.
+      - name: Create GitHub Deployment (pending)
+        id: create_deployment
+        uses: chrnorm/deployment-action@v2
+        with:
+          token: ${{ github.token }}
+          environment: ${{ github.event.inputs.environment || 'production' }}
+          environment-url: 'https://example.com'
+          description: 'Dummy deployment to generate events for Jira; no real server change.'
+          ref: ${{ github.event.inputs.ref || github.sha }}
+          initial-status: pending
+
+      # If this run is a test-only manual run, mark the deployment as success
+      # immediately without running any real deployment steps.
+      - name: Mark deployment as successful (test-only)
+        if: ${{ github.event.inputs.test_only == 'true' }}
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.create_deployment.outputs.deployment_id }}
+          environment-url: ${{ steps.create_deployment.outputs.environment_url }}
+          state: success
+
+      # Otherwise, perform a simulated deployment (no external side effects)
+      - name: Simulate deploy (noop)
+        if: ${{ github.event.inputs.test_only != 'true' }}
+        run: |
+          echo "Simulating deployment steps (no external servers):"
+          echo "Would run rsync/kubectl/docker push here"
+          sleep 1
+
+      # After the (simulated) deploy, mark the deployment as successful.
+      - name: Mark deployment as successful (after deploy)
+        if: ${{ github.event.inputs.test_only != 'true' }}
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.create_deployment.outputs.deployment_id }}
+          environment-url: ${{ steps.create_deployment.outputs.environment_url }}
+          state: success
+
+# Notes:
+# - Run manually from Actions → "Jira Deploy Test" or with the CLI:
+#     gh workflow run deploy.yml --ref main -f environment=staging -f test_only=true
+# - If you need the deployment events to trigger other workflows, consider
+#   using a PAT (personal access token) with sufficient permissions instead
+#   of the default GITHUB_TOKEN (GitHub's GITHUB_TOKEN won't trigger other workflows in some cases).
+# - The `environment-url` is set to https://example.com so platforms like Jira
+#   can display a link to the deployed environment.
