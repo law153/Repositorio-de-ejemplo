@@ -58,6 +58,15 @@ jobs:
           production-environment: ${{ github.event.inputs.environment == 'production' }}
           initial-status: pending
 
+      - name: Test-only: mark deployment as successful (no-op)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_only == 'true' }}
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.create_deployment.outputs.deployment_id }}
+          environment-url: ${{ steps.create_deployment.outputs.environment_url }}
+          state: success
+
       - name: Demo deploy step (replace with your real deploy)
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.test_only == 'true') }}
         run: |
