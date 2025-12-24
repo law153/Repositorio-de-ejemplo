@@ -1,0 +1,70 @@
+name: Deploy to remote server
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: false
+        default: 'production'
+      test_only:
+        description: 'If true, mark deployment successful without doing the actual deploy (for testing Jira integration)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub deployment
+        uses: chrnorm/deployment-action@v2
+        id: deployment
+        with:
+          token: ${{ github.token }}
+          environment: ${{ github.event.inputs.environment || 'production' }}
+          environment-url: 'https://example.com'
+
+      - name: Deploy (test-only, marks success immediately)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_only == 'true' }}
+        run: |
+          echo "Test-only mode: marking deployment as successful without running actual deployment"
+
+      - name: Deploy files to remote server via rsync
+        if: ${{ ! (github.event_name == 'workflow_dispatch' && github.event.inputs.test_only == 'true') }}
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          TARGET_DIR: ${{ secrets.TARGET_DIR }}
+        run: |
+          set -e
+          echo "Deploying to ${SSH_USER}@${SSH_HOST}:${TARGET_DIR}"
+          # Uncomment when you have SSH secrets configured:
+          # rsync -avz --delete --exclude '.git' ./ "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}"
+
+      - name: Update deployment status (success)
+        if: success()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: success
+          environment-url: 'https://example.com'
+
+      - name: Update deployment status (failure)
+        if: failure()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: failure
+          environment-url: 'https://example.com'

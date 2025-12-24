@@ -1,0 +1,116 @@
+name: Deploy to remote server
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: false
+        default: 'production'
+      test_only:
+        description: 'If true, mark deployment successful without doing the actual deploy (for testing integrations)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect project and run build (Node/Python)
+        run: |
+          set -e
+          if [ -f package.json ]; then
+            echo "Detected Node project — running npm ci && npm run build if available"
+            npm ci
+            if jq -e '.scripts.build' package.json >/dev/null 2>&1; then npm run build; fi
+          elif [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+            echo "Detected Python project — creating venv and installing requirements"
+            python -m venv .venv
+            . .venv/bin/activate
+            if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          else
+            echo "No Node/Python build detected — skipping build step"
+          fi
+
+      - name: Create GitHub deployment
+        uses: chrnorm/deployment-action@v2
+        id: deployment
+        with:
+          token: ${{ github.token }}
+          environment: ${{ github.event.inputs.environment || 'production' }}
+          environment-url: 'https://example.com'
+
+      - name: Test-only deploy (mark success, no action)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_only == 'true' }}
+        run: |
+          echo "Test-only mode: marking deployment as successful without running actual deployment"
+
+      - name: Start SSH agent
+        if: ${{ ! (github.event_name == 'workflow_dispatch' && github.event.inputs.test_only == 'true') }}
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy files to remote server via rsync
+        if: ${{ ! (github.event_name == 'workflow_dispatch' && github.event.inputs.test_only == 'true') }}
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          TARGET_DIR: ${{ secrets.TARGET_DIR }}
+          RSYNC_EXCLUDES: ${{ secrets.RSYNC_EXCLUDES }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -e
+          echo "Deploying to ${SSH_USER}@${SSH_HOST}:${TARGET_DIR}"
+          SSH_OPTS="-o StrictHostKeyChecking=no"
+          if [ -n "${SSH_PORT}" ]; then SSH_OPTS="$SSH_OPTS -p ${SSH_PORT}"; fi
+          RSYNC_EXCLUDE_ARGS=""
+          if [ -n "${RSYNC_EXCLUDES}" ]; then
+            for pattern in ${RSYNC_EXCLUDES}; do
+              RSYNC_EXCLUDE_ARGS="$RSYNC_EXCLUDE_ARGS --exclude='$pattern'"
+            done
+          fi
+          rsync -avz --delete $RSYNC_EXCLUDE_ARGS --exclude '.git' ./ "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}" -e "ssh ${SSH_OPTS}"
+
+      - name: Update deployment status (success)
+        if: success()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: success
+          environment-url: 'https://example.com'
+
+      - name: Update deployment status (failure)
+        if: failure()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: failure
+          environment-url: 'https://example.com'
+
+      # Optional: report to Jira (example)
+      # - name: Report deployment to Jira
+      #   if: success()
+      #   run: |
+      #     curl -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
+      #       -X POST -H "Content-Type: application/json" \
+      #       "https://your-jira-site.atlassian.net/rest/deployments/0.1/bulk" \
+      #       -d '{"deployments":[{"deploymentSequenceNumber":${{ github.run_number }},"updateSequenceNumber":1,"displayName":"Deployment ${{ github.run_number }}","url":"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}","description":"Deploy from GitHub Actions","lastUpdated":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","state":"successful","pipeline":"GitHub Actions","environment":"'${{ github.event.inputs.environment || 'production' }}'"}]}'
