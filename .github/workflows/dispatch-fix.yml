@@ -2,6 +2,10 @@ name: Dispatch Fix Test
 
 on:
   workflow_dispatch:
+    inputs:
+      test:
+        description: 'A short test string'
+        required: false
 
 jobs:
   noop:
