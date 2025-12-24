@@ -1,0 +1,52 @@
+name: Delete All Deployments (manual, dangerous)
+
+# WARNING: This workflow will permanently delete deployments from this repo.
+# It is intentionally manual-only and requires a positive confirmation input.
+# Use with care.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type YES to confirm deletion of ALL deployments in this repo'
+        required: true
+
+permissions:
+  deployments: write
+
+jobs:
+  delete-all:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "YES" ]; then
+            echo "Confirmation not provided (must be YES). Exiting without deleting anything.";
+            exit 1;
+          fi
+
+      - name: List and delete all deployments (using GitHub API)
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+
+            // List deployments (per_page used to get more in one request)
+            let page = 1
+            let totalDeleted = 0
+            while (true) {
+              const res = await github.rest.repos.listDeployments({ owner, repo, per_page: 100, page })
+              const deployments = res.data
+              if (deployments.length === 0) break
+
+              for (const d of deployments) {
+                console.log(`Deleting deployment id=${d.id} environment=${d.environment}`)
+                await github.rest.repos.deleteDeployment({ owner, repo, deployment_id: d.id })
+                totalDeleted += 1
+              }
+
+              page += 1
+            }
+
+            console.log(`Deleted ${totalDeleted} deployments (if any existed).`)
